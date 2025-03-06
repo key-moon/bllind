@@ -60,6 +60,6 @@ class LessThanQueryPlanner(QueryPlanner):
         idx = choose[0][n]
         
         return items[idx][0], {
-            True: dict(items[:idx+1]),
-            False: dict(items[idx+1:])
+            True: dict(items[:idx]),
+            False: dict(items[idx:])
         }
