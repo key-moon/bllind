@@ -161,14 +161,11 @@ class LLMPredictor(Predictor):
         continue
 
       grown_prefix = prefix[len(prediction_prefix) :]
-      # FIXME: 価値は grown prefix の構築を達成できる確率である必要がある
-      #        そういうケースはまれなので一旦無視
-      if grown_prefix == "":
-        token_value = 1
-      else:
-        if grown_prefix not in predicted_result:
-          continue
-        token_value = predicted_result[grown_prefix]
+      token_value = 1
+      cur_prefix = prediction_prefix
+      for c in grown_prefix:
+        token_value *= self.next_char_probs_dict[cur_prefix][c]
+        cur_prefix += c
 
       for token, prob in predicted_result.items():
         if len(token) <= len(grown_prefix) or not token.startswith(grown_prefix):
