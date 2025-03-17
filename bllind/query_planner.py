@@ -47,6 +47,7 @@ class LessThanQueryPlanner(QueryPlanner):
   def plan(
     self, probs: Dict[str, float]
   ) -> Tuple[QueryT, Dict[ResT, Dict[str, float]]]:
+    # TODO: add dp result caching
     items = sorted(probs.items())
 
     # p: prefix sums of probabilities

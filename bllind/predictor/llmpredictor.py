@@ -1,7 +1,7 @@
 from functools import cache
 import hashlib
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from numpy import ndarray
 from platformdirs import user_cache_dir
@@ -15,7 +15,8 @@ from transformers import (
   AutoModelForCausalLM,
   AutoTokenizer,
   PreTrainedModel,
-  PreTrainedTokenizerBase,
+  PreTrainedTokenizer,
+  PreTrainedTokenizerFast,
 )
 import re
 import pickle
@@ -36,7 +37,6 @@ Here is an example of CTF flags:
 """.strip()
 DEFAULT_MODEL = "openai-community/gpt2"
 # DEFAULT_MODEL = "TinyLlama/TinyLlama_v1.1"
-# DEFAULT_MODEL = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
 global_cache_dir = Path(user_cache_dir("bllind"))
 
@@ -46,39 +46,35 @@ def canonicalize_model_name(model: str):
 
 
 def get_cache_path(
-  cache: Union[bool, str],
   cache_name: str,
   prompt: str | Callable[[str], str],
-  model: str,
+  model: str | Any,
+  cache_slug: Optional[str],
 ):
-  if isinstance(cache, bool):
-    if cache:
-      if not isinstance(prompt, str):
-        raise ValueError("cache name requires when the prompt is not a string")
+  if cache_slug is None:
+    if cache_name is not None and model is not None and prompt is not None:
       digest = hashlib.md5(f"{cache_name}##{model}##{prompt}".encode()).hexdigest()
-      return (
-        global_cache_dir / f"{cache_name}_{canonicalize_model_name(model)}_{digest}"
-      )
     else:
-      return None
+      digest = None
+  else:
+    if "/" in cache_slug or "\\" in cache_slug:
+      raise ValueError("cache_slug should not contain '/' or '\\'")
+    digest = cache_slug
 
-  if "/" not in cache:
-    digest = hashlib.md5(
-      f"{cache_name}##{model}##{cache}##{prompt}".encode()
-    ).hexdigest()
+  if digest is not None:
+    raise ValueError("cache slug requires when the prompt or model is not a string")
+  else:
     return (
-      global_cache_dir
-      / f"{cache_name}_{canonicalize_model_name(model)}_{cache}_{digest}"
+      global_cache_dir / f"{cache_name}_{canonicalize_model_name(model)}_{cache_slug}"
     )
 
-  user_cache_dir = Path(cache)
-  return user_cache_dir
+
+def get_cache_slug(prompt, model):
+  pass
 
 
 cached_model_retriever = cache(AutoModelForCausalLM.from_pretrained)
 cached_tokenizer_retriever = cache(AutoTokenizer.from_pretrained)
-
-DEBUG_CACHE = True
 
 
 class LLMPredictor(Predictor):
@@ -86,9 +82,10 @@ class LLMPredictor(Predictor):
     self,
     prompt: str | Callable[[str], str],
     model: str | PreTrainedModel = DEFAULT_MODEL,
-    tokenizer: Optional[PreTrainedTokenizerBase] = None,
+    tokenizer: Optional[PreTrainedTokenizer | PreTrainedTokenizerFast] = None,
     use_attention_cache: bool = True,
-    permanent_next_token_cache: Union[bool, str] = False,
+    permanent_next_token_cache: bool = False,
+    cache_slug: Optional[str] = None,
   ):
     self.promptGetter = (
       prompt if callable(prompt) else lambda prefix: prompt.format(prefix=prefix)
@@ -104,12 +101,13 @@ class LLMPredictor(Predictor):
     self.model.eval()
 
     self.token_count = len(self.tokenizer)
-    self.tokens: List[str] = self.tokenizer.convert_ids_to_tokens(
-      list(range(self.token_count))
-    )
+    self.tokens = self.tokenizer.convert_ids_to_tokens(list(range(self.token_count)))
+    assert isinstance(self.tokens, list)
 
-    self.next_token_cache_path = get_cache_path(
-      permanent_next_token_cache, "next_token", prompt, model
+    self.next_token_cache_path = (
+      get_cache_path("next_token", prompt, model, cache_slug)
+      if permanent_next_token_cache
+      else None
     )
 
     self.use_attention_cache = use_attention_cache
@@ -153,7 +151,8 @@ class LLMPredictor(Predictor):
       if self.use_attention_cache:
         prev_input = "".join(
           map(
-            self.token_decoder, self.tokenizer.convert_ids_to_tokens(input_ids[0][:-1])
+            self.token_decoder,
+            self.tokenizer.convert_ids_to_tokens(input_ids[0][:-1]),  # type: ignore
           )
         )
         past_kv = self.past_key_values.get(prev_input)
@@ -166,7 +165,7 @@ class LLMPredictor(Predictor):
           outputs = self.model(**inputs)
         else:
           outputs = self.model(
-            input_ids[:, -1:],
+            input_ids[:, -1:],  # type: ignore
             past_key_values=past_kv,
           )
           # assert self.model(**inputs).logits == outputs.logits

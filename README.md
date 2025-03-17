@@ -4,13 +4,13 @@ LLM などの次トークン予測器を用いて、Blind SQL Injection など�
 
 ## 思想
 
-先頭から文字列を1文字ずつ特定していく、Blind SQL Injection系の攻撃について考える。
+先頭から文字列を 1 文字ずつ特定していく、Blind SQL Injection 系の攻撃について考える。
 
-ここで、LLMなどの次の文字を予測する技術によって投げるクエリを効率的にすることができる。
+ここで、LLM などの次の文字を予測する技術によって投げるクエリを効率的にすることができる。
 
-これを行うPythonライブラリを作りたい。
+これを行う Python ライブラリを作りたい。
 
-Pythonライブラリでは、以下の様なコードがかければ理想である。
+Python ライブラリでは、以下の様なコードがかければ理想である。
 
 ```py
 def oracle(prefix: str):
@@ -31,7 +31,7 @@ do_blind_attack(
 )
 ```
 
-ここで、predictorは次の文字の確率分布を返す。また、queryplannerは確率分布からクエリと、クエリの結果ごとの事後確率を返せば良い。
+ここで、predictor は次の文字の確率分布を返す。また、queryplanner は確率分布からクエリと、クエリの結果ごとの事後確率を返せば良い。
 
 ```py
 class QueryPlanner:
@@ -44,6 +44,7 @@ class QueryPlanner:
 このライブラリは、以下のクラスを含みます：
 
 ### Predictor（基底クラス）
+
 次の文字の確率分布を返すクラス。
 
 ```python
@@ -53,7 +54,8 @@ class Predictor:
 ```
 
 ### FilteredPredictor（派生クラス）
-LLMPredictorを使用し、特定の文字セットにフィルタリングされた予測を返すクラス。
+
+LLMPredictor を使用し、特定の文字セットにフィルタリングされた予測を返すクラス。
 
 ```python
 class FilteredPredictor(Predictor):
@@ -66,7 +68,8 @@ class FilteredPredictor(Predictor):
 ```
 
 ### LLMPredictor（派生クラス）
-LLMを使用して次の文字を予測するクラス。
+
+LLM を使用して次の文字を予測するクラス。
 
 ```python
 class LLMPredictor(Predictor):
@@ -78,6 +81,7 @@ class LLMPredictor(Predictor):
 ```
 
 ### QueryPlanner（基底クラス）
+
 クエリと事後確率を計画するクラス。
 
 ```python
@@ -87,6 +91,7 @@ class QueryPlanner:
 ```
 
 ### PrefixQueryPlanner（派生クラス）
+
 プレフィックスに基づいてクエリを計画するクラス。
 
 ```python
@@ -96,6 +101,7 @@ class PrefixQueryPlanner(QueryPlanner):
 ```
 
 ### BisectQueryPlanner（派生クラス）
+
 二分探索に基づいてクエリを計画するクラス。
 
 ```python
