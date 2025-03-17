@@ -1,20 +1,39 @@
 from functools import cache
 import hashlib
 from pathlib import Path
-from typing import Callable, Dict, Union
+from typing import Callable, Dict, List, Optional, Union
 
 from numpy import ndarray
 from platformdirs import user_cache_dir
 
 from bllind.predictor import Predictor
+from bllind.logger import logger
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from tokenizers import Tokenizer
+from transformers import (
+  AutoModelForCausalLM,
+  AutoTokenizer,
+  PreTrainedModel,
+  PreTrainedTokenizerBase,
+)
 import re
 import pickle
 import time
 
-CTF_FLAG_PROMPT = "A CTF Flag usually forms a sentence encoded in a 1337 form, and words are joined with `-` or `_`. Following is a example: {prefix}"
+CTF_FLAG_PROMPT = """
+A CTF Flag usually forms a sentence encoded in a Leetspeak form, and words are joined with `_` or `-`, or sometimes ` `. In some cases charactors may be UPPER, but usually most of charactors are lowercases.
+
+### Leetspeak (1337) Examples:
+- `hello world` -> `h3l10_w0r1d`
+- `flag found` -> `f14g_f0und`
+- `secure code` -> `s3cur3_c0d3`
+- `leet hacker` -> `1337_h4ck3r`
+
+Here is an example of CTF flags:
+- Flag{{h3ll0_w0rld}}
+- {prefix}
+""".strip()
 DEFAULT_MODEL = "openai-community/gpt2"
 # DEFAULT_MODEL = "TinyLlama/TinyLlama_v1.1"
 # DEFAULT_MODEL = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
@@ -66,19 +85,28 @@ class LLMPredictor(Predictor):
   def __init__(
     self,
     prompt: str | Callable[[str], str],
-    model: str = DEFAULT_MODEL,
+    model: str | PreTrainedModel = DEFAULT_MODEL,
+    tokenizer: Optional[PreTrainedTokenizerBase] = None,
     use_attention_cache: bool = True,
     permanent_next_token_cache: Union[bool, str] = False,
   ):
     self.promptGetter = (
       prompt if callable(prompt) else lambda prefix: prompt.format(prefix=prefix)
     )
-    self.model = cached_model_retriever(model)
+    if isinstance(model, str):
+      self.model: PreTrainedModel = cached_model_retriever(model)
+      self.tokenizer = cached_tokenizer_retriever(model)
+    else:
+      if tokenizer is None:
+        raise ValueError("Tokenizer must be provided when model object is provided")
+      self.model = model
+      self.tokenizer = tokenizer
     self.model.eval()
-    self.tokenizer = cached_tokenizer_retriever(model)
 
     self.token_count = len(self.tokenizer)
-    self.tokens = self.tokenizer.convert_ids_to_tokens(list(range(self.token_count)))
+    self.tokens: List[str] = self.tokenizer.convert_ids_to_tokens(
+      list(range(self.token_count))
+    )
 
     self.next_token_cache_path = get_cache_path(
       permanent_next_token_cache, "next_token", prompt, model
@@ -90,7 +118,9 @@ class LLMPredictor(Predictor):
     self.next_tokens: Dict[str, Dict[str, float]] = {}
     self.next_char_probs_dict: Dict[str, Dict[str, float]] = {}
 
-    self.token_decoder: Callable[[str], str] = lambda s: s.replace("Ġ", " ")
+    self.token_decoder: Callable[[str], str] = lambda s: s.replace("Ġ", " ").replace(
+      "▁", " "
+    )
 
   def _get_permanent_next_token_cache(self, prefix: str):
     if self.next_token_cache_path is None:
@@ -98,7 +128,7 @@ class LLMPredictor(Predictor):
     path = self.next_token_cache_path / hashlib.md5(prefix.encode()).hexdigest()
     if not path.exists():
       return None
-    print("[*] permanent next_token cache hit!")
+    logger.debug("permanent next_token cache hit!")
     with path.open("rb") as f:
       return pickle.load(f)
 
@@ -127,7 +157,7 @@ class LLMPredictor(Predictor):
           )
         )
         past_kv = self.past_key_values.get(prev_input)
-        print(f"[*] has attention cache: {past_kv is not None}")
+        logger.debug(f"has attention cache: {past_kv is not None}")
       else:
         past_kv = None
       with torch.no_grad():
@@ -139,10 +169,9 @@ class LLMPredictor(Predictor):
             input_ids[:, -1:],
             past_key_values=past_kv,
           )
-          # if DEBUG_CACHE:
           # assert self.model(**inputs).logits == outputs.logits
         end_time = time.time()
-        print(f"[*] Time taken for prediction: {end_time - start_time:.2f} secs")
+        logger.debug(f"Time taken for prediction: {end_time - start_time:.2f} secs")
         if self.use_attention_cache:
           self.past_key_values[prompt] = outputs.past_key_values
         probabilities = torch.softmax(outputs.logits[:, -1, :], dim=-1)
@@ -174,6 +203,12 @@ class LLMPredictor(Predictor):
         if first_char not in next_char_probs:
           next_char_probs[first_char] = 0
         next_char_probs[first_char] += prob / token_value
+
+    total_prob = sum(next_char_probs.values())
+    if total_prob > 0:
+      next_char_probs = {
+        char: prob / total_prob for char, prob in next_char_probs.items()
+      }
 
     self.next_char_probs_dict[prefix] = next_char_probs
 
