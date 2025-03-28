@@ -36,7 +36,6 @@ Here is an example of CTF flags:
 - {prefix}
 """.strip()
 DEFAULT_MODEL = "openai-community/gpt2"
-# DEFAULT_MODEL = "TinyLlama/TinyLlama_v1.1"
 
 global_cache_dir = Path(user_cache_dir("bllind"))
 
@@ -61,16 +60,12 @@ def get_cache_path(
       raise ValueError("cache_slug should not contain '/' or '\\'")
     digest = cache_slug
 
-  if digest is not None:
+  if digest is None:
     raise ValueError("cache slug requires when the prompt or model is not a string")
   else:
     return (
       global_cache_dir / f"{cache_name}_{canonicalize_model_name(model)}_{cache_slug}"
     )
-
-
-def get_cache_slug(prompt, model):
-  pass
 
 
 cached_model_retriever = cache(AutoModelForCausalLM.from_pretrained)
@@ -91,6 +86,7 @@ class LLMPredictor(Predictor):
       prompt if callable(prompt) else lambda prefix: prompt.format(prefix=prefix)
     )
     if isinstance(model, str):
+      logger.info("loading the model and the tokenizer...")
       self.model: PreTrainedModel = cached_model_retriever(model)
       self.tokenizer = cached_tokenizer_retriever(model)
     else:
